@@ -1,0 +1,16 @@
+[project]
+name = "contract-red-flag-reader"
+version = "0.1.0"
+description = "Offline rule-based red-flag scanner for freelance contracts (EN/RO)"
+requires-python = ">=3.9"
+readme = "README.md"
+
+[project.scripts]
+redflag = "redflag.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["redflag"]
