@@ -298,26 +298,32 @@ DEPOSIT = rx(r"deposit|advance|upfront|up-front|retainer|milestone|installment|a
 
 
 def payment_days(clause: Clause):
-    """Return (days, match) of the longest payment term in the clause, or None."""
-    text = clause.folded
-    if re.search(r"terminat|rezilie|denunt", text) and not re.search(r"invoice|factur", text):
-        return None
+    """Return (days, match, sentence_offset) of the longest payment term in the clause, or None."""
     best = None
-    for pat in PAYTERM:
-        for m in pat.finditer(text):
-            groups = [g for g in m.groups() if g]
-            if not groups:
+    offset = 0
+    for sentence in re.split(r"(?<=\.)\s+", clause.folded):
+        pos = clause.folded.find(sentence, offset)
+        offset = pos + len(sentence)
+        if re.search(r"terminat|rezilie|denunt", sentence) and not re.search(r"invoice|factur", sentence):
+            continue
+        paying = bool(PAY_CONTEXT.search(sentence))
+        for pat in PAYTERM:
+            if not paying and not pat.pattern.startswith(r"\bnet"):
                 continue
-            days = to_int(groups[0])
-            kind = groups[1] if len(groups) > 1 else ""
-            if kind.startswith(("business", "working", "lucr")):
-                days = round(days * 1.45)
+            for m in pat.finditer(sentence):
+                groups = [g for g in m.groups() if g]
+                if not groups:
+                    continue
+                days = to_int(groups[0])
+                kind = groups[1] if len(groups) > 1 else ""
+                if kind.startswith(("business", "working", "lucr")):
+                    days = round(days * 1.45)
+                if best is None or days > best[0]:
+                    best = (days, (pos + m.start(), pos + m.end()))
+        for m in PAY_MONTHS.finditer(sentence):
+            days = to_int(m.group(1)) * 30
             if best is None or days > best[0]:
-                best = (days, m)
-    for m in PAY_MONTHS.finditer(text):
-        days = to_int(m.group(1)) * 30
-        if best is None or days > best[0]:
-            best = (days, m)
+                best = (days, (pos + m.start(), pos + m.end()))
     return best
 
 
@@ -332,7 +338,7 @@ def detect_payment(doc: Doc) -> list:
         if found and (longest is None or found[0] > longest[0]):
             longest = (found[0], found[1], clause)
     if longest:
-        days, m, clause = longest
+        days, span, clause = longest
         sev = "high" if days >= 60 else "medium" if days >= 45 else "low" if days > 30 else None
         if sev:
             out.append(finding(
@@ -343,7 +349,7 @@ def detect_payment(doc: Doc) -> list:
                         + (" Între profesioniști, Legea 72/2013 limitează termenele contractuale la 60 de zile (peste, doar dacă nu sunt abuzive)." if days > 60 else "")},
                 {"en": "Counter with Net 15 or Net 30, a 30-50% deposit up front, and milestone invoices.",
                  "ro": "Propuneți 15 sau 30 de zile, un avans de 30-50% și facturare pe etape."},
-                clause, m.span()))
+                clause, span))
     elif pay_clause_seen:
         first = next(c for c in doc.clauses if PAY_CONTEXT.search(c.folded) and AMOUNT.search(c.folded))
         out.append(finding(
@@ -427,7 +433,7 @@ def detect_noncompete(doc: Doc) -> list:
                 {"en": "Non-compete restricts your other clients" if kind == "noncompete" else "Exclusivity: you may not work for others",
                  "ro": "Clauză de neconcurență care vă limitează ceilalți clienți" if kind == "noncompete" else "Exclusivitate: nu puteți lucra pentru alții"},
                 {"en": f"This can block you from serving whole segments of the market ({span['en']}{', broad scope' if broad else ''}). A freelancer lives on many clients; a blanket ban can mean no income, usually unpaid.",
-                 "ro": f"Vă poate bloca accesul la segmente întregi de piață ({span['ro']}{', domeniu larg' if broad else ''}). Un freelancer trăiește din mai mulți clienți; o interdicție generală înseamnă venit zero, de obicei necompensat."},
+                 "ro": f"Vă poate bloca accesul la segmente întregi de piață ({span['ro']}{', domeniu larg' if broad else ''}). Un freelancer trăiește din mai mulți clienți; o interdicție generală înseamnă venit zero. În contractele comerciale, clauza ar trebui să precizeze zona geografică și tipul de servicii, iar compensația nu e impusă de lege, deci trebuie negociată."},
                 {"en": "Delete it, or narrow to 2-3 named direct competitors, project-only duration (max ~6 months) and pay for the restriction. Also check local law on contractor non-competes.",
                  "ro": "Eliminați-o sau restrângeți la 2-3 concurenți numiți, doar pe durata proiectului (max ~6 luni) și cu compensație. Verificați și legea locală privind neconcurența colaboratorilor."},
                 clause, m.span()))
@@ -466,6 +472,20 @@ CONSEQUENTIAL = re.compile(r"(?:liable|responsible|raspunde|raspunzator)\w*.{0,6
 NEGATION = re.compile(r"\bnot\b|\bno\b|\bneither\b|\bnor\b|exclud|waive|disclaim|nu\s+(?:va|vor)|fara")
 
 
+CLIENT_INDEMNIFIES = re.compile(r"(?:client|company|customer|beneficiar\w*)\s+(?:agrees\s+to\s+|shall\s+|will\s+)?(?:defend,?\s+)?(?:indemnif|hold\s+harmless|despagubeste)")
+MUTUAL = re.compile(r"each\s+party|both\s+parties|either\s+party|fiecare\s+parte|ambele\s+parti")
+
+
+def _contractor_indemnities(doc: Doc):
+    """Indemnity matches that burden the contractor: not client-to-contractor and not mutual."""
+    for clause in doc.clauses:
+        for m in INDEMNITY.finditer(clause.folded):
+            before = clause.folded[max(0, clause.folded.rfind(". ", 0, m.start()) + 1):m.end()]
+            if CLIENT_INDEMNIFIES.search(before) or MUTUAL.search(before):
+                continue
+            yield clause, m
+
+
 def detect_liability(doc: Doc) -> list:
     out = []
     capped = doc.has(LIAB_CAP)
@@ -481,7 +501,7 @@ def detect_liability(doc: Doc) -> list:
              "ro": "Plafonați răspunderea totală la onorariile încasate în ultimele 12 luni (sau valoarea proiectului), reciproc, și excludeți daunele indirecte."},
             clause, m.span()))
         break
-    ind = next(each(doc, INDEMNITY), None)
+    ind = next(((c, m) for c, m in _contractor_indemnities(doc)), None)
     if ind:
         clause, m = ind
         broad = bool(BROAD_INDEMNITY.search(clause.folded))
@@ -530,6 +550,8 @@ TERM_CONVENIENCE = rx(
 PAID_ON_EXIT = rx(
     r"kill\s+fee", r"cancell?ation\s+fee", r"pay\w*\s+for\s+(?:all\s+)?(?:work|services)\s+(?:completed|performed|done|rendered)",
     r"(?:work|services)\s+(?:completed|performed|rendered|delivered)\s+(?:up\s+to|through|until|prior|before)",
+    r"(?:pay\w*|paid|compensat\w*|invoice\w*).{0,60}?(?:work|services)\s+(?:done|performed|completed|delivered|rendered)",
+    r"(?:work|services)\s+(?:done|performed|completed|delivered|rendered)\b.{0,40}?(?:paid|compensat|invoice|pay)",
     r"taxa\s+de\s+anulare", r"(?:serviciile|lucrarile)\s+(?:prestate|efectuate|realizate)",
 )
 ABSOLUTE_WARRANTY = rx(

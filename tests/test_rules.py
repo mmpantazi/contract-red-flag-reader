@@ -167,6 +167,29 @@ class Typography(unittest.TestCase):
         self.assertIn("noncompete.noncompete", rules(t))
 
 
+class FalsePositives(unittest.TestCase):
+    def test_other_day_counts_not_payment(self):
+        t = "Client shall pay each invoice within 14 days. Client must notify defects within 60 days after delivery."
+        self.assertNotIn("payment.long_terms", rules(t))
+
+    def test_client_indemnity_not_flagged(self):
+        t = "Client agrees to indemnify Contractor against third-party claims. Contractor's liability is limited to fees paid."
+        self.assertNotIn("liability.indemnity", rules(t))
+
+    def test_mutual_indemnity_not_flagged(self):
+        self.assertNotIn("liability.indemnity", rules("Each party shall indemnify the other against third-party claims."))
+
+    def test_work_done_is_paid_counts_as_kill_fee(self):
+        self.assertNotIn("termination.no_kill_fee", rules("Either party may cancel with 7 days' notice; work done is paid."))
+
+    def test_unlimited_users_is_not_revisions(self):
+        self.assertNotIn("revisions.unlimited", rules("The licence covers an unlimited number of users."))
+
+    def test_balanced_contract_is_clean(self):
+        with open(os.path.join(ROOT, "examples", "balanced_en.txt"), encoding="utf-8") as fh:
+            self.assertEqual([f.rule for f in scan(fh.read())], [])
+
+
 class NewRules(unittest.TestCase):
     def test_delay_penalty(self):
         self.assertIn("delivery.penalty", rules("If Contractor misses a deadline, Contractor shall pay liquidated damages of $500 per day."))
@@ -267,6 +290,13 @@ class Cli(unittest.TestCase):
     def test_min_severity(self):
         _, out = self.run_cli(os.path.join(ROOT, "examples", "bad_en.txt"), "--format", "json", "--min-severity", "high")
         self.assertEqual({f["severity"] for f in json.loads(out)["findings"]}, {"high"})
+
+    def test_binary_file_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.dat")
+            with open(path, "wb") as fh:
+                fh.write(bytes(range(256)) * 20)
+            self.assertEqual(self.run_cli(path)[0], 2)
 
     def test_missing_file(self):
         self.assertEqual(self.run_cli("/no/such/file.txt")[0], 2)

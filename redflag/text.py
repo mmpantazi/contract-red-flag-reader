@@ -51,7 +51,10 @@ def load(path: str) -> str:
         if lower.endswith(".pdf"):
             return _read_pdf(path)
         with open(path, encoding="utf-8-sig", errors="replace") as fh:
-            return fh.read()
+            text = fh.read()
+        if "\x00" in text or text.count("\ufffd") > max(5, len(text) // 20):
+            raise LoadError(f"{path} does not look like a text file (binary content)")
+        return text
     except OSError as exc:
         raise LoadError(f"cannot read {path}: {exc.strerror or exc}") from exc
 
@@ -123,10 +126,10 @@ def split_clauses(raw: str) -> list[Clause]:
 def sentence_around(clause: Clause, start: int, end: int, limit: int = 320) -> str:
     """Return the sentence of the clause containing the span [start, end)."""
     text = clause.text
-    left = max(text.rfind(". ", 0, start), text.rfind("; ", 0, start))
+    left = text.rfind(". ", 0, start)
     left = 0 if left < 0 else left + 2
-    stops = [i for i in (text.find(". ", end), text.find("; ", end)) if i >= 0]
-    right = min(stops) + 1 if stops else len(text)
+    stop = text.find(". ", end)
+    right = stop + 1 if stop >= 0 else len(text)
     sentence = text[left:right].strip()
     if len(sentence) <= 40 and right < len(text):  # a bare heading such as "Non-Competition."
         nxt = text.find(". ", right + 1)

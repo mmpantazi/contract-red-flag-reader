@@ -27,11 +27,11 @@ python -m redflag - < contract.txt             # stdin
 python -m redflag contract.txt --min-severity medium --fail-on high   # exit 1 if any high finding
 ```
 
-Inputs: `.txt`, `.md`, `.docx` (built in), `.pdf` (needs `pdftotext` from poppler-utils; otherwise export to text). Scanned PDFs without a text layer are not supported.
+Inputs: `.txt`, `.md`, `.docx` (built in), `.pdf` (needs `pdftotext` from poppler-utils; otherwise export to text). Scanned PDFs without a text layer and binary files are rejected with exit code 2.
 
 Optional install: `pip install .` gives a `redflag` command.
 
-Try it: `python -m redflag examples/bad_en.txt`, `examples/bad_ro.txt` (Romanian), `examples/realistic_en.txt` (typical client-drafted contract), `examples/fair_en.txt` (clean).
+Try it: `python -m redflag examples/bad_en.txt`, `examples/bad_ro.txt` (Romanian), `examples/realistic_en.txt` (typical client-drafted contract), `examples/fair_en.txt` and `examples/balanced_en.txt` (clean; used to guard against false positives).
 
 Exit codes: 0 ok, 1 findings at or above `--fail-on`, 2 unreadable input.
 
