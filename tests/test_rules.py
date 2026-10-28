@@ -157,6 +157,54 @@ class Other(unittest.TestCase):
         self.assertIn("warranty.absolute", rules("Contractor warrants the work will be error-free."))
 
 
+class Typography(unittest.TestCase):
+    def test_curly_apostrophe_and_dash(self):
+        self.assertIn("revisions.satisfaction", rules("Work must be done to the Client\u2019s satisfaction."))
+        self.assertEqual(sev("Payment terms: Net\u201190. Fee $500.", "payment.long_terms"), "high")
+
+    def test_comma_separated_noncompete(self):
+        t = "Contractor shall not, directly or indirectly, engage in any business that competes with Company."
+        self.assertIn("noncompete.noncompete", rules(t))
+
+
+class NewRules(unittest.TestCase):
+    def test_delay_penalty(self):
+        self.assertIn("delivery.penalty", rules("If Contractor misses a deadline, Contractor shall pay liquidated damages of $500 per day."))
+
+    def test_control(self):
+        self.assertIn("classification.control", rules("Contractor will be available during Client's normal business hours."))
+
+    def test_portfolio(self):
+        t = "Contractor assigns all copyright in the deliverables to Client."
+        self.assertIn("ip.no_portfolio", rules(t))
+        self.assertNotIn("ip.no_portfolio", rules(t + " Contractor may show the work in a portfolio."))
+
+    def test_romanian_cession_scope(self):
+        self.assertIn("ip.ro_cession_scope", rules("Prestatorul cesionează toate drepturile de autor asupra operelor."))
+        t = "Prestatorul cesionează drepturile de autor pe o durată de 5 ani, pe teritoriul României."
+        self.assertNotIn("ip.ro_cession_scope", rules(t))
+
+    def test_realistic_contract(self):
+        with open(os.path.join(ROOT, "examples", "realistic_en.txt"), encoding="utf-8") as fh:
+            r = rules(fh.read())
+        for expected in ("revisions.unlimited", "payment.long_terms", "ip.before_payment", "noncompete.noncompete",
+                         "liability.indemnity", "delivery.penalty", "classification.control"):
+            self.assertIn(expected, r)
+
+
+class Language(unittest.TestCase):
+    def test_detect(self):
+        from redflag.text import detect_language
+        self.assertEqual(detect_language("Prestatorul va livra serviciile către Beneficiar."), "ro")
+        self.assertEqual(detect_language("The Contractor shall deliver the services."), "en")
+
+    def test_auto_language_in_cli(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main([os.path.join(ROOT, "examples", "bad_ro.txt"), "--format", "json"])
+        self.assertIn("Revizuiri nelimitate", buf.getvalue())
+
+
 class Text(unittest.TestCase):
     def test_fold_preserves_length(self):
         s = "Plată înțeleasă ȘI Țară"

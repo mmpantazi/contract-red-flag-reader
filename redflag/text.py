@@ -18,10 +18,24 @@ class LoadError(Exception):
     pass
 
 
+TYPOGRAPHY = str.maketrans({
+    "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"', "\u2010": "-", "\u2011": "-",
+    "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u00a0": " ", "\u202f": " ",
+})
+ROMANIAN_HINTS = re.compile(r"\b(?:contract|prestator\w*|beneficiar\w*|clauza|termen|plata|drepturi|servicii|onorariu|factur\w*|art\.|cesion\w*)\b|[ăâîșțşţ]", re.I)
+ENGLISH_HINTS = re.compile(r"\b(?:the|shall|agreement|client|contractor|payment|services|liability|party|parties)\b", re.I)
+
+
+def detect_language(text: str) -> str:
+    ro = len(ROMANIAN_HINTS.findall(text))
+    en = len(ENGLISH_HINTS.findall(text))
+    return "ro" if ro > en else "en"
+
+
 def fold(text: str) -> str:
-    """Lower-case and strip diacritics one character at a time so offsets match the original."""
+    """Lower-case, normalise typography and strip diacritics one character at a time so offsets match the original."""
     out = []
-    for ch in text:
+    for ch in text.translate(TYPOGRAPHY):
         base = unicodedata.normalize("NFD", ch)[0].lower()
         out.append(base if len(base) == 1 else ch.lower()[:1])
     return "".join(out)

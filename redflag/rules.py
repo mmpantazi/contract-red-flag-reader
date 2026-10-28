@@ -397,7 +397,8 @@ def detect_payment(doc: Doc) -> list:
 
 NONCOMPETE = rx(
     r"non-?\s?compet", r"not\s+(?:to\s+)?compet",
-    r"shall\s+not\s+(?:directly\s+or\s+indirectly\s+)?(?:provide|perform|render|offer|engage|work|be\s+engaged|accept)\b.{0,100}?(?:compet|similar|same|any\s+other\s+(?:client|customer|company))",
+    r"restrictive\s+covenant", r"competes?\s+with\s+(?:the\s+)?(?:client|company)",
+    r"shall\s+not,?\s+(?:directly\s+or\s+indirectly,?\s+)?(?:provide|perform|render|offer|engage|work|be\s+engaged|accept)\b.{0,100}?(?:compet|similar|same|any\s+other\s+(?:client|customer|company))",
     r"neconcurent", r"nu\s+va\s+(?:presta|desfasura|furniza|lucra)\b.{0,100}?(?:similar|concurent|alt\w+\s+client|alti\s+clienti)",
 )
 EXCLUSIVITY = rx(
@@ -520,7 +521,7 @@ def detect_liability(doc: Doc) -> list:
 
 # ---------------------------------------------------------------- other quiet clauses
 
-TERMINATION = rx(r"terminat", r"cancel", r"rezilie", r"denunt", r"anulare")
+TERMINATION = rx(r"terminate\b", r"upon\s+termination", r"termination\s+(?:of|for|by|without)", r"cancel", r"rezilie", r"denunt", r"anulare")
 TERM_CONVENIENCE = rx(
     r"terminate\b.{0,80}?(?:for\s+convenience|at\s+any\s+time|for\s+any\s+reason|without\s+cause|sole\s+discretion)",
     r"(?:for\s+convenience|without\s+cause)\b.{0,60}?terminat",
@@ -551,6 +552,24 @@ CONFIDENTIAL = rx(r"confiden")
 PERPETUAL = rx(r"in\s+perpetuity", r"perpetual", r"indefinite", r"forever", r"fara\s+limita\s+de\s+timp", r"nelimitat\s+in\s+timp", r"pe\s+perioada\s+nedeterminata")
 DISPUTES = rx(r"arbitra", r"exclusive\s+jurisdiction", r"venue", r"jurisdictia\s+exclusiva", r"instantel?\s+(?:din|de\s+la)")
 INSURANCE = rx(r"(?:maintain|carry|obtain|procure)\s+.{0,40}?insurance", r"(?:asigurare|asigurari)\s+(?:de\s+raspundere|profesional)")
+
+
+PENALTY = rx(
+    r"liquidated\s+damages", r"(?:penalt(?:y|ies)|late\s+(?:delivery|completion)\s+(?:fee|charge))\b.{0,80}?(?:delay|late|deadline|each\s+day|per\s+day)",
+    r"(?:delay|late|deadline|each\s+day|per\s+day).{0,80}?(?:penalt(?:y|ies)|deduct)",
+    r"penalitati?\s+de\s+intarziere\s+(?:pentru\s+)?(?:prestator|livrare)", r"(?:prestatorul|contractorul)\s+datoreaza\s+penalit",
+)
+NO_PORTFOLIO_MENTION = rx(r"portfolio", r"self-?promotion", r"promotional\s+purposes", r"portofoliu", r"promovare")
+CONTROL = rx(
+    r"(?:fixed|set|regular|standard)\s+(?:working\s+)?hours", r"(?:normal|regular)\s+business\s+hours",
+    r"(?:shall|must)\s+(?:personally\s+)?(?:perform|render|provide)\b.{0,40}?(?:personally|in\s+person)",
+    r"(?:may|shall)\s+not\s+(?:subcontract|delegate|use\s+(?:a\s+)?(?:substitute|replacement))",
+    r"(?:on|at)\s+(?:the\s+)?client'?s\s+premises", r"(?:request|approval)\s+for\s+(?:leave|time\s+off|vacation)",
+    r"program\s+de\s+lucru\s+(?:fix|stabilit)", r"nu\s+poate\s+(?:subcontracta|delega)",
+)
+RO_ASSIGNMENT = rx(r"cesion", r"cesiun")
+RO_DURATION = rx(r"durat", r"perioad", r"termen\s+de\s+\d", r"nelimitat", r"pe\s+viata")
+RO_TERRITORY = rx(r"teritori", r"mondial", r"romania")
 
 
 def _simple(doc, pat, rule, cat, sev, title, why, fix, only_if=None) -> list:
@@ -630,6 +649,40 @@ def detect_other(doc: Doc) -> list:
          "ro": "Limitele de asigurare gândite pentru furnizori mari pot costa mai mult decât câștigați din contract."},
         {"en": "Negotiate the limits or have the client reimburse the premium.",
          "ro": "Negociați limitele sau cereți clientului să ramburseze prima."})
+    out += _simple(
+        doc, PENALTY, "delivery.penalty", "Scope", "medium",
+        {"en": "Penalties or liquidated damages for delay", "ro": "Penalități sau daune convenite pentru întârziere"},
+        {"en": "You pay per day of delay, even when the delay was caused by late client feedback, and often with no ceiling.",
+         "ro": "Plătiți pe zi de întârziere, chiar dacă întârzierea vine din feedback-ul tardiv al clientului, adesea fără plafon."},
+        {"en": "Make deadlines move with client delays, cap the penalty (e.g. 5-10% of the fee) and make it the client's sole remedy.",
+         "ro": "Legați termenele de răspunsurile clientului, plafonați penalitatea (de ex. 5-10% din onorariu) și faceți-o unica despăgubire."})
+    out += _simple(
+        doc, CONTROL, "classification.control", "Scope", "low",
+        {"en": "Employee-like control (fixed hours, personal service, no substitute)", "ro": "Control de tip angajat (program fix, prestare personală, fără înlocuitor)"},
+        {"en": "Terms that dictate when and how you work blur the line between contractor and employee: you take the risk of a contractor without a contractor's freedom, and tax or labour authorities may reclassify the relationship.",
+         "ro": "Clauzele care dictează când și cum lucrați estompează granița dintre colaborator și angajat: purtați riscul unui colaborator fără libertatea lui, iar autoritățile fiscale sau de muncă pot reîncadra relația."},
+        {"en": "Describe results and deadlines instead of hours, allow substitution or subcontracting, and work from your own premises and tools.",
+         "ro": "Descrieți rezultate și termene în loc de ore, permiteți înlocuirea sau subcontractarea și lucrați din spațiul și cu echipamentul vostru."})
+    ip_clause = next((c for c in doc.clauses if ASSIGN.search(c.folded) and IP_WORDS.search(c.folded)), None)
+    if ip_clause and not doc.has(NO_PORTFOLIO_MENTION):
+        out.append(finding(
+            "ip.no_portfolio", "IP assignment", "low",
+            {"en": "No right to show the work in your portfolio", "ro": "Niciun drept de a arăta lucrarea în portofoliu"},
+            {"en": "After a full assignment you technically need permission to show your own work.",
+             "ro": "După o cesiune integrală, tehnic aveți nevoie de permisiune ca să vă arătați propria lucrare."},
+            {"en": "Add: \"Contractor may display the deliverables in a portfolio after public release.\"",
+             "ro": "Adăugați: „Prestatorul poate afișa livrabilele în portofoliu după lansarea publică.”"},
+            ip_clause, ASSIGN.search(ip_clause.folded).span()))
+    ro_clause = next((c for c in doc.clauses if RO_ASSIGNMENT.search(c.folded) and IP_WORDS.search(c.folded)), None)
+    if ro_clause and not (RO_DURATION.search(ro_clause.folded) and RO_TERRITORY.search(ro_clause.folded)):
+        out.append(finding(
+            "ip.ro_cession_scope", "IP assignment", "medium",
+            {"en": "Romanian copyright assignment without stated duration or territory", "ro": "Cesiune de drepturi de autor fără durată sau teritoriu precizate"},
+            {"en": "Romanian copyright law expects an assignment to state its scope, duration, territory and remuneration; a vague blanket cession is both unfavourable to you and legally shaky. Confirm with a lawyer.",
+             "ro": "Legea nr. 8/1996 presupune ca cesiunea să precizeze modul de exploatare, durata, teritoriul și remunerația; o cesiune generală și vagă este defavorabilă și nesigură juridic. Confirmați cu un avocat."},
+            {"en": "Spell out which uses, for how long, where, and at what price the rights are assigned.",
+             "ro": "Precizați ce moduri de exploatare, pentru cât timp, unde și la ce preț se cesionează drepturile."},
+            ro_clause, RO_ASSIGNMENT.search(ro_clause.folded).span()))
     return out
 
 
